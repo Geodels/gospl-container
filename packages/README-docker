@@ -1,0 +1,35 @@
+## pnetCDF: Parallel netcdf
+
+https://github.com/dhoule/Parallel-DBSCAN
+
+Compilation of pnetCDF did not worked from the docker file, but worked from the terminal in Jupyter
+after the container was installed...
+
+From the terminal I ran the following command
+>bash
+>export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/conda/lib
+>cd /notebooks/pnetcdf-1.12.1
+>mkdir build
+>cd build
+>../configure CC=mpicc --prefix=/opt/conda --enable-shared
+>make -j 
+>make install
+
+In the dockerfile I have added the files created after the installation.
+They are contained in packages/pnetcdf and need to be added to /opt/conda/
+
+# parallel-DBSCAN
+>bash
+>export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/conda/lib
+>cd /notebooks/pDBSCAN/bin
+>make
+
+We modify the Makefile so that we point to the right directories:
+------------------------
+PNET_DIR = /opt/conda
+MPI_DIR = /opt/conda
+BOOST_DIR = /opt/conda
+------------------------
+
+Testing parallel dbscan using the dataset:
+>mpirun -n 4 dbscan -i datasets/clus50k.bin -b -m 5 -e 25 -o out_clusters.nc
