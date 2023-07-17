@@ -119,8 +119,9 @@ class PITFill(object):
         # }
         # df = pd.DataFrame(data, columns=["p1", "p2"])
 
-        df["p2"] = sort_ids( df["p1"].values.astype(int), df["p2"].values.astype(int) )
-        df = df.drop_duplicates().sort_values(["p2", "p1"], ascending=(False, False))
+        if len(df)>1:
+            df["p2"] = sort_ids( df["p1"].values.astype(int), df["p2"].values.astype(int) )
+            df = df.drop_duplicates().sort_values(["p2", "p1"], ascending=(False, False))
 
         return df
 
