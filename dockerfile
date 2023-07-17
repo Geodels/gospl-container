@@ -35,6 +35,8 @@ RUN pip install numpy==1.23.4
 RUN pip uninstall stripy -y
 RUN pip install stripy
 ENV ESMFMKFILE=/opt/conda/lib/esmf.mk
+RUN pip install pyvista
+RUN apt-get install -y libtbb2
 # See file packages/README-docker for the installation of pnetcdf and parallel-dbscan
 COPY packages/pnetcdf/lib/libpnetcdf.* /opt/conda/lib/
 COPY packages/pnetcdf/lib/pnetcdf.pc /opt/conda/lib/pkgconfig/
