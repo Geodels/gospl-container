@@ -39,8 +39,14 @@ class EarthPlate(object):
 
         fplate = self.platedata.iloc[self.plateMov, 1]
         mdata = np.load(fplate)
-        self.isCluster = mdata["clust"]
-        self.clustNgbhs = mdata["cngbh"]
+        if "clust" in list(mdata.keys()):
+            self.isCluster = mdata["clust"]
+        else:
+            self.isCluster = None
+        if "cngbh" in list(mdata.keys()):
+            self.clustNgbhs = mdata["cngbh"]
+        else:
+            self.clustNgbhs = None
         self.distNbghs = mdata["dngbh"]
         self.idNbghs = mdata["ingbh"]
         del mdata
@@ -83,6 +89,19 @@ class EarthPlate(object):
         gED[self.locIDs] = edl
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gED, op=MPI.MAX)
 
+        if self.gflexOn:
+            # Send local erosion deposition from flexure globally
+            ced = self.cumEDFlex.getArray().copy()
+            gcED = np.zeros(self.mpoints, dtype=np.float64) - 1.0e10
+            gcED[self.locIDs] = ced
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gcED, op=MPI.MAX)
+            
+            # Send local flexural isostasy globally
+            cfl = self.cumFlexL.getArray().copy()
+            gcFL = np.zeros(self.mpoints, dtype=np.float64) - 1.0e10
+            gcFL[self.locIDs] = cfl
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gcFL, op=MPI.MAX)
+
         if MPIrank == 0 and self.verbose:
             print(
                 "Transfer local elevation/erosion globally (%0.02f seconds)"
@@ -91,26 +110,45 @@ class EarthPlate(object):
             )
 
         # Get relevant files information
-        self._readAdvectionData()
-
-        # For clustered points get heights of nearest neighbours
         t0 = process_time()
-        idCluster = self.isCluster > 0
-        tmp = gZ[idCluster]
-        tmpngb = tmp[self.clustNgbhs]
-        # Set new heights to the maximum height of nearest neighbours
-        gZ[idCluster] = np.max(tmpngb, axis=1)
+        self._readAdvectionData()
+        if MPIrank == 0 and self.verbose:
+            print(
+                "Read advection data (%0.02f seconds)"
+                % (process_time() - t0),
+                flush=True,
+            )
+        t0 = process_time()
+        if self.clustNgbhs is not None:
+            # For clustered points get heights of nearest neighbours
+            idCluster = self.isCluster > 0
+            tmp = gZ[idCluster]
+            tmpngb = tmp[self.clustNgbhs]
+            # Set new heights to the maximum height of nearest neighbours
+            gZ[idCluster] = np.max(tmpngb, axis=1)
 
-        # For clustered points get erosion/deposition of nearest neighbours
-        tmp = gED[idCluster]
-        tmpngb = tmp[self.clustNgbhs]
-        # Set new erosion deposition to the maximum values of nearest neighbours
-        gED[idCluster] = np.min(tmpngb, axis=1)
+            # For clustered points get erosion/deposition of nearest neighbours
+            tmp = gED[idCluster]
+            tmpngb = tmp[self.clustNgbhs]
+            # Set new erosion deposition to the maximum values of nearest neighbours
+            gED[idCluster] = np.min(tmpngb, axis=1)
+
+            if self.gflexOn:
+                tmp = gcED[idCluster]
+                tmpngb = tmp[self.clustNgbhs]
+                gcED[idCluster] = np.min(tmpngb, axis=1)
+
+                tmp = gcFL[idCluster]
+                tmpngb = tmp[self.clustNgbhs]
+                gcFL[idCluster] = np.min(tmpngb, axis=1)
 
         # Update elevation and erosion/deposition
         if self.interp == 1:
             nelev = gZ[self.idNbghs]
             nerodep = gED[self.idNbghs]
+            if self.gflexOn:
+               nf_ed = gcED[self.idNbghs]
+               nflex = gcFL[self.idNbghs]
         else:
             # Inverse weighting distance...
             weights = np.divide(
@@ -125,9 +163,17 @@ class EarthPlate(object):
             nelev = np.divide(tmp, temp, out=np.zeros_like(temp), where=temp != 0)
             tmp = np.sum(weights * gED[self.idNbghs], axis=1)
             nerodep = np.divide(tmp, temp, out=np.zeros_like(temp), where=temp != 0)
+            if self.gflexOn:
+                tmp = np.sum(weights * gcED[self.idNbghs], axis=1)
+                nf_ed = np.divide(tmp, temp, out=np.zeros_like(temp), where=temp != 0)
+                tmp = np.sum(weights * gcFL[self.idNbghs], axis=1)
+                nflex = np.divide(tmp, temp, out=np.zeros_like(temp), where=temp != 0)
             if len(onIDs) > 0:
                 nelev[onIDs] = gZ[self.idNbghs[onIDs, 0]]
                 nerodep[onIDs] = gED[self.idNbghs[onIDs, 0]]
+                if self.gflexOn:
+                    nf_ed[onIDs] = gcED[self.idNbghs[onIDs, 0]]
+                    nflex[onIDs] = gcFL[self.idNbghs[onIDs, 0]]
 
         # Remove marine erosion
         if self.fitMarine:
@@ -147,6 +193,10 @@ class EarthPlate(object):
 
         self.cumED.setArray(nerodep[self.glbIDs])
         self.dm.globalToLocal(self.cumED, self.cumEDLocal)
+
+        if self.gflexOn:
+            self.cumEDFlex.setArray(nf_ed[self.locIDs])
+            self.cumFlexL.setArray(nflex[self.locIDs])
 
         # Update stratigraphic record
         if self.stratNb > 0 and self.stratStep > 0:
@@ -300,7 +350,6 @@ class EarthPlate(object):
         # Read and load the file
         tplate = self.platedata.iloc[self.paleoMov, 2]
         mdata = np.load(tplate)
-
         # If tectonic conditions exist
         if "t" in list(mdata.keys()):
             self.uplift = mdata["t"][self.locIDs]

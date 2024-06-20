@@ -12,3 +12,6 @@ pre-commit>=2.7.1
 vtk>=9.0.1
 numpy-indexed>=0.3.5
 scikit-fuzzy>=0.4.2
+gflex
+xarray
+pyproj

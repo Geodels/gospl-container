@@ -1,5 +1,5 @@
 FROM continuumio/anaconda3
-MAINTAINER "Tristan Salles"
+LABEL org.opencontainers.image.authors="tristan.salles@sydney.edu.au"
 RUN apt-get update 
 RUN /opt/conda/bin/conda config --env --add channels defaults 
 RUN /opt/conda/bin/conda config --env --add channels conda-forge 
@@ -30,6 +30,8 @@ RUN /opt/conda/bin/conda install -c conda-forge xesmf -y
 RUN /opt/conda/bin/conda install -c conda-forge ncurses -y
 RUN /opt/conda/bin/conda install -c conda-forge metpy -y
 RUN /opt/conda/bin/conda install -c conda-forge xarray-spatial -y
+RUN /opt/conda/bin/conda install -c conda-forge gflex -y
+RUN /opt/conda/bin/conda install -c conda-forge jigsaw -y
 RUN pip install wget cmocean cartopy
 RUN pip install numpy==1.23.4
 RUN pip uninstall stripy -y

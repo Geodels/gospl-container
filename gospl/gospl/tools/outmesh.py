@@ -129,9 +129,7 @@ class WriteMesh(object):
         - porosity of coarse sediment `phiS` in each stratigraphic layer computed at center of each layer.
         - porosity of fine sediment `phiF` in each stratigraphic layer computed at center of each layer.
         - porosity of weathered sediment `phiW` in each stratigraphic layer computed at center of each layer.
-        - proportion of carbonate sediment `stratC` contains in each stratigraphic layer if the carbonate module is turned on.
-        - porosity of carbonate sediment `phiC` in each stratigraphic layer computed at center of each layer when the carbonate module is turned on.
-
+        
         .. important::
 
             It is worth mentioning that the stratigraphic architecture is only outputed as HDF5 files and does not record the XMF and XDMF files. A set of post-processing scripts are then required to extract the informations and visualise the stratigraphic records of any specific simulations.
@@ -146,6 +144,7 @@ class WriteMesh(object):
             + str(MPIrank)
             + ".h5"
         )
+
         with h5py.File(h5file, "w") as f:
 
             # Write stratal layers elevations per layers
@@ -175,63 +174,6 @@ class WriteMesh(object):
             )
             f["phiS"][:, : self.stratStep] = self.phiS[:, : self.stratStep]
 
-            if self.stratF is not None:
-                # Write stratal layers fine percentage per layers
-                f.create_dataset(
-                    "stratF",
-                    shape=(self.lpoints, self.stratStep),
-                    dtype="float64",
-                    compression="gzip",
-                )
-                f["stratF"][:, : self.stratStep] = self.stratF[:, : self.stratStep]
-
-                # Write porosity values for fine sediments
-                f.create_dataset(
-                    "phiF",
-                    shape=(self.lpoints, self.stratStep),
-                    dtype="float64",
-                    compression="gzip",
-                )
-                f["phiF"][:, : self.stratStep] = self.phiF[:, : self.stratStep]
-
-            if self.stratW is not None:
-                # Write stratal layers weathered percentage per layers
-                f.create_dataset(
-                    "stratW",
-                    shape=(self.lpoints, self.stratStep),
-                    dtype="float64",
-                    compression="gzip",
-                )
-                f["stratW"][:, : self.stratStep] = self.stratW[:, : self.stratStep]
-
-                # Write porosity values for weathered sediments
-                f.create_dataset(
-                    "phiW",
-                    shape=(self.lpoints, self.stratStep),
-                    dtype="float64",
-                    compression="gzip",
-                )
-                f["phiW"][:, : self.stratStep] = self.phiW[:, : self.stratStep]
-
-            # Write stratal layers carbonate percentage per layers
-            if self.carbOn:
-                f.create_dataset(
-                    "stratC",
-                    shape=(self.lpoints, self.stratStep),
-                    dtype="float64",
-                    compression="gzip",
-                )
-                f["stratC"][:, : self.stratStep] = self.stratC[:, : self.stratStep]
-
-                # Write porosity values for carbonate sediments
-                f.create_dataset(
-                    "phiC",
-                    shape=(self.lpoints, self.stratStep),
-                    dtype="float64",
-                    compression="gzip",
-                )
-                f["phiC"][:, : self.stratStep] = self.phiC[:, : self.stratStep]
-
         MPIcomm.Barrier()
 
         if MPIrank == 0 and self.verbose:
@@ -250,6 +192,7 @@ class WriteMesh(object):
 
         - surface elevation `elev`.
         - cumulative erosion & deposition values `erodep`.
+        - erosion & deposition rate values `EDrate` for the considered time step.
         - flow accumulation `flowAcc` before pit filling.
         - river sediment load `sedLoad`.
         - fine sediment load `sedLoadf` when dual lithologies are accounted for.
@@ -307,16 +250,13 @@ class WriteMesh(object):
             )
             f["erodep"][:, 0] = self.cumEDLocal.getArray()
             f.create_dataset(
-                "flowAcc",
+                "EDrate",
                 shape=(self.lpoints, 1),
                 dtype="float32",
                 compression="gzip",
             )
-            data = self.FAL.getArray().copy()
-            data[data <= 1.0e-8] = 1.0e-8
-            if not self.fast:
-                data[self.seaID] = 1.0
-            f["flowAcc"][:, 0] = data
+            data = self.EbLocal.getArray().copy()
+            f["EDrate"][:, 0] = data
             if not self.fast:
                 f.create_dataset(
                     "waterFill",
@@ -336,6 +276,36 @@ class WriteMesh(object):
             if not self.fast:
                 data[self.seaID] = 1.0
             f["fillFA"][:, 0] = data
+            
+            if self.iceOn:
+                f.create_dataset(
+                    "iceFA",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    compression="gzip",
+                )
+                data = self.iceFAL.getArray().copy()
+                data[data <= 1.0e-8] = 1.0e-8
+                if not self.fast:
+                    data[self.seaID] = 1.0
+                f["iceFA"][:, 0] = data
+            if self.flexOn:
+                f.create_dataset(
+                    "fexIso",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    compression="gzip",
+                )
+                f["fexIso"][:, 0] = self.localFlex
+            if self.gflexOn:
+                f.create_dataset(
+                    "fexIso",
+                    shape=(self.lpoints, 1),
+                    dtype="float32",
+                    compression="gzip",
+                )
+                data = self.cumFlexL.getArray().copy()
+                f["fexIso"][:, 0] = data
             f.create_dataset(
                 "sedLoad",
                 shape=(self.lpoints, 1),
@@ -345,37 +315,6 @@ class WriteMesh(object):
             data = self.vSedLocal.getArray().copy()
             data[data <= 1.0e-8] = 1.0e-8
             f["sedLoad"][:, 0] = data
-            if self.stratNb > 0:
-                if self.stratF is not None:
-                    f.create_dataset(
-                        "sedLoadf",
-                        shape=(self.lpoints, 1),
-                        dtype="float32",
-                        compression="gzip",
-                    )
-                    data = self.vSedfLocal.getArray().copy()
-                    data[data <= 1.0e-8] = 1.0e-8
-                    f["sedLoadf"][:, 0] = data
-                if self.stratW is not None:
-                    f.create_dataset(
-                        "sedLoadw",
-                        shape=(self.lpoints, 1),
-                        dtype="float32",
-                        compression="gzip",
-                    )
-                    data = self.vSedwLocal.getArray().copy()
-                    data[data <= 1.0e-8] = 1.0e-8
-                    f["sedLoadw"][:, 0] = data
-                if self.carbOn:
-                    f.create_dataset(
-                        "sedLoadc",
-                        shape=(self.lpoints, 1),
-                        dtype="float32",
-                        compression="gzip",
-                    )
-                    data = self.vSedcLocal.getArray().copy()
-                    data[data <= 1.0e-8] = 1.0e-8
-                    f["sedLoadc"][:, 0] = data
             if self.uplift is not None:
                 f.create_dataset(
                     "uplift",
@@ -384,7 +323,7 @@ class WriteMesh(object):
                     compression="gzip",
                 )
                 f["uplift"][:, 0] = self.uplift
-            if self.paleoMov > 0 and self.tNow > self.tStart:
+            if self.paleoZ is not None and self.tNow > self.tStart:
                 f.create_dataset(
                     "paleotec",
                     shape=(self.lpoints, 1),
@@ -441,7 +380,7 @@ class WriteMesh(object):
 
         - surface elevation `elev`.
         - cumulative erosion & deposition values `erodep`.
-        - flow accumulation `flowAcc` before pit filling.
+        - erosion & deposition values `EDrate` for the considered time step.
         - river sediment load `sedLoad`.
         - fine sediment load `sedLoadf` when dual lithologies are accounted for.
         - weathered sediment load `sedLoadw` when dual lithologies are accounted for.
@@ -469,22 +408,19 @@ class WriteMesh(object):
         self.dm.localToGlobal(self.cumEDLocal, self.cumED)
         self.vSedLocal.setArray(np.array(hf["/sedLoad"])[:, 0])
         self.dm.localToGlobal(self.vSedLocal, self.vSed)
-        self.FAL.setArray(np.array(hf["/flowAcc"])[:, 0])
+        self.EbLocal.setArray(np.array(hf["/EDrate"])[:, 0])
+        self.dm.localToGlobal(self.EbLocal, self.Eb)
+        self.FAL.setArray(np.array(hf["/fillFA"])[:, 0])
         self.fillFAL.setArray(np.array(hf["/fillFA"])[:, 0])
         self.dm.localToGlobal(self.FAL, self.FAG)
-        if self.stratNb > 0:
-            if self.stratF is not None:
-                self.vSedfLocal.setArray(np.array(hf["/sedLoadf"])[:, 0])
-                self.dm.localToGlobal(self.vSedfLocal, self.vSedf)
-            if self.stratW is not None:
-                self.vSedwLocal.setArray(np.array(hf["/sedLoadw"])[:, 0])
-                self.dm.localToGlobal(self.vSedwLocal, self.vSedw)
-            if self.carbOn:
-                self.vSedcLocal.setArray(np.array(hf["/sedLoadc"])[:, 0])
-                self.dm.localToGlobal(self.vSedcLocal, self.vSedc)
         self.elems = MPIcomm.gather(len(self.lcells[:, 0]), root=0)
         self.nodes = MPIcomm.gather(len(self.lcoords[:, 0]), root=0)
 
+        if self.flexOn:
+            self.localFlex = np.array(hf["/fexIso"])[:, 0]
+        if self.gflexOn:
+            self.cumFlexL.setArray(np.array(hf["/fexIso"])[:, 0])
+            self.cumEDFlex.setArray(np.array(hf["/erodep"])[:, 0])
         hf.close()
 
         if self.stratNb > 0 and self.stratStep > 0:
@@ -502,37 +438,13 @@ class WriteMesh(object):
                 raise ValueError("Restart file is missing...")
 
             self.stratZ.fill(0.0)
-            self.stratZ[:, : self.stratStep] = np.array(hf["/stratZ"])
+            self.stratZ[:, : self.stratStep-1] = np.array(hf["/stratZ"])
             self.stratH.fill(0.0)
-            self.stratH[:, : self.stratStep] = np.array(hf["/stratH"])
+            self.stratH[:, : self.stratStep-1] = np.array(hf["/stratH"])
             self.phiS.fill(0.0)
-            self.phiS[:, : self.stratStep] = np.array(hf["/phiS"])
-
-            if self.stratF is not None:
-                self.stratF.fill(0.0)
-                self.stratF[:, : self.stratStep] = np.array(hf["/stratF"])
-                self.phiF.fill(0.0)
-                self.phiF[:, : self.stratStep] = np.array(hf["/phiF"])
-            if self.stratW is not None:
-                self.stratW.fill(0.0)
-                self.stratW[:, : self.stratStep] = np.array(hf["/stratW"])
-                self.phiW.fill(0.0)
-                self.phiW[:, : self.stratStep] = np.array(hf["/phiW"])
-            if self.carbOn:
-                self.stratC.fill(0.0)
-                self.stratC[:, : self.stratStep] = np.array(hf["/stratC"])
-                self.phiC.fill(0.0)
-                self.phiC[:, : self.stratStep] = np.array(hf["/phiC"])
+            self.phiS[:, : self.stratStep-1] = np.array(hf["/phiS"])
 
             hf.close()
-
-        # Set global erosion deposition values for model using plates advection
-        # if self.platedata is not None:
-        #     edl = self.cumEDLocal.getArray().copy()
-        #     gED = np.zeros(self.mpoints, dtype=np.float64) - 1.0e10
-        #     gED[self.locIDs] = edl
-        #     MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, gED, op=MPI.MAX)
-        #     self.edold = gED.copy()
 
         return
 
@@ -607,12 +519,12 @@ class WriteMesh(object):
                 )
                 f.write("         </Attribute>\n")
 
-            f.write('         <Attribute Type="Scalar" Center="Node" Name="FA">\n')
+            f.write('         <Attribute Type="Scalar" Center="Node" Name="EDrate">\n')
             f.write(
                 '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
             )
             f.write(
-                'Dimensions="%d 1">%s:/flowAcc</DataItem>\n' % (self.nodes[p], pfile)
+                'Dimensions="%d 1">%s:/EDrate</DataItem>\n' % (self.nodes[p], pfile)
             )
             f.write("         </Attribute>\n")
 
@@ -625,6 +537,26 @@ class WriteMesh(object):
             )
             f.write("         </Attribute>\n")
 
+            if self.iceOn:
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="iceFA">\n')
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/iceFA</DataItem>\n' % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
+
+            if self.flexOn or self.gflexOn:
+                f.write('         <Attribute Type="Scalar" Center="Node" Name="fexIso">\n')
+                f.write(
+                    '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
+                )
+                f.write(
+                    'Dimensions="%d 1">%s:/fexIso</DataItem>\n' % (self.nodes[p], pfile)
+                )
+                f.write("         </Attribute>\n")
+
             f.write('         <Attribute Type="Scalar" Center="Node" Name="SL">\n')
             f.write(
                 '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
@@ -633,43 +565,6 @@ class WriteMesh(object):
                 'Dimensions="%d 1">%s:/sedLoad</DataItem>\n' % (self.nodes[p], pfile)
             )
             f.write("         </Attribute>\n")
-            if self.stratNb > 0:
-                if self.stratF is not None:
-                    f.write(
-                        '         <Attribute Type="Scalar" Center="Node" Name="SLf">\n'
-                    )
-                    f.write(
-                        '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
-                    )
-                    f.write(
-                        'Dimensions="%d 1">%s:/sedLoadf</DataItem>\n'
-                        % (self.nodes[p], pfile)
-                    )
-                    f.write("         </Attribute>\n")
-                if self.stratW is not None:
-                    f.write(
-                        '         <Attribute Type="Scalar" Center="Node" Name="SLw">\n'
-                    )
-                    f.write(
-                        '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
-                    )
-                    f.write(
-                        'Dimensions="%d 1">%s:/sedLoadw</DataItem>\n'
-                        % (self.nodes[p], pfile)
-                    )
-                    f.write("         </Attribute>\n")
-                if self.carbOn:
-                    f.write(
-                        '         <Attribute Type="Scalar" Center="Node" Name="SLc">\n'
-                    )
-                    f.write(
-                        '          <DataItem Format="HDF" NumberType="Float" Precision="4" '
-                    )
-                    f.write(
-                        'Dimensions="%d 1">%s:/sedLoadc</DataItem>\n'
-                        % (self.nodes[p], pfile)
-                    )
-                    f.write("         </Attribute>\n")
 
             if self.hdisp is not None:
                 f.write(
@@ -693,7 +588,7 @@ class WriteMesh(object):
                     'Dimensions="%d 1">%s:/uplift</DataItem>\n' % (self.nodes[p], pfile)
                 )
                 f.write("         </Attribute>\n")
-            if self.paleoMov > 0 and self.tNow > self.tStart:
+            if self.paleoZ is not None and self.tNow > self.tStart:
                 f.write(
                     '         <Attribute Type="Scalar" Center="Node" Name="paleoTec">\n'
                 )

@@ -17,6 +17,7 @@ from vtk.util import numpy_support
 
 if "READTHEDOCS" not in os.environ:
     from gospl._fortran import definetin
+    from gospl._fortran import getbc
 
 petsc4py.init(sys.argv)
 MPIrank = petsc4py.PETSc.COMM_WORLD.Get_rank()
@@ -50,7 +51,10 @@ class UnstMesh(object):
         self.hdisp = None
         self.uplift = None
         self.rainVal = None
+        self.sedfacVal = None
         self.memclear = False
+        self.southPts = None
+
         # Let us define the mesh variables and build PETSc DMPLEX.
         self._buildMesh()
 
@@ -378,6 +382,19 @@ class UnstMesh(object):
         MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, nib, op=MPI.MAX)
         if nib[0] > 0:
             self.flatModel = True
+            self.south = int(self.boundCond[0])
+            self.east = int(self.boundCond[1])
+            self.north = int(self.boundCond[2])
+            self.west = int(self.boundCond[3])
+            xmin = self.mCoords[:,0].min()
+            xmax = self.mCoords[:,0].max()
+            ymin = self.mCoords[:,1].min()
+            ymax = self.mCoords[:,1].max()
+            self.southPts = np.where(self.lcoords[:,1]==ymin)[0]
+            self.northPts = np.where(self.lcoords[:,1]==ymax)[0]
+            self.eastPts = np.where(self.lcoords[:,0]==xmax)[0]
+            self.westPts = np.where(self.lcoords[:,0]==xmin)[0]
+
         del idLocal
         vIS.destroy()
 
@@ -413,21 +430,23 @@ class UnstMesh(object):
         self.areaLocal = self.hLocal.duplicate()
         self.areaLocal.setArray(self.larea)
         self.dm.localToGlobal(self.areaLocal, self.areaGlobal)
+        self.dm.globalToLocal(self.areaGlobal, self.areaLocal)
+        self.larea = self.areaLocal.getArray().copy()
 
         # Forcing event number
         self.bG = self.hGlobal.duplicate()
         self.bL = self.hLocal.duplicate()
-
         self.rainNb = -1
         self.tecNb = -1
         self.flexNb = -1
+        self.sedfactNb = -1
 
         del tree, distances, tmp2  # , indices, tmp
         del l2g, offproc, gZ, out, ptscells
         gc.collect()
 
         # Map longitude/latitude coordinates
-        self._xyz2lonlat()
+        # self._xyz2lonlat()
 
         # Build stratigraphic data if any
         if self.stratNb > 0:
@@ -530,7 +549,14 @@ class UnstMesh(object):
             self.sealevel = self.seafunction(self.tNow + self.dt)
 
         # Climate information
-        self._updateRain()
+        if self.oroOn:
+            self.cptOrography()
+        else:
+            self._updateRain()
+
+        # Erodibility factor information
+        if self.sedfacdata is not None:
+            self._updateEroFactor()
 
         if MPIrank == 0 and self.verbose:
             print(
@@ -541,6 +567,20 @@ class UnstMesh(object):
         # Tectonic forcing
         self._updateTectonics()
 
+        # Assign mesh boundaries
+        if self.flatModel:
+            tmp = self.hLocal.getArray().copy()
+            if self.south == 0 and len(self.southPts) > 0:
+                tmp[self.southPts] = getbc(len(self.southPts),tmp,self.southPts)
+            if self.north == 0 and len(self.northPts) > 0:
+                tmp[self.northPts] = getbc(len(self.northPts),tmp,self.northPts)
+            if self.east == 0 and len(self.eastPts) > 0:
+                tmp[self.eastPts] = getbc(len(self.eastPts),tmp,self.eastPts)
+            if self.west == 0 and len(self.westPts) > 0:
+                tmp[self.westPts] = getbc(len(self.westPts),tmp,self.westPts)
+            self.hLocal.setArray(tmp)
+            self.dm.localToGlobal(self.hLocal, self.hGlobal)
+
         return
 
     def applyTectonics(self):
@@ -549,7 +589,6 @@ class UnstMesh(object):
         """
 
         t0 = process_time()
-        # self._updateTectonics()
 
         if self.tecdata is None and self.uplift is not None:
             # Define vertical displacements
@@ -597,6 +636,39 @@ class UnstMesh(object):
         self.rainVal = self.rainMesh[self.locIDs]
         self.bL.setArray(self.rainVal * self.larea)
         self.dm.localToGlobal(self.bL, self.bG)
+        
+        return
+
+    def _updateEroFactor(self):
+        """
+        Finds current erodibility factor values for the considered time interval.
+
+        .. note::
+
+            It is worth noting that the erodibility factor is an indice representing different lithological classes (see Moosdorf et al., 2018).
+
+        """
+
+        nb = self.sedfactNb
+        if nb < len(self.sedfacdata) - 1:
+            if self.sedfacdata.iloc[nb + 1, 0] <= self.tNow:  # + self.dt:
+                nb += 1
+
+        if nb > self.sedfactNb or nb == -1:
+            if nb == -1:
+                nb = 0
+
+            self.sedfactNb = nb
+            if pd.isnull(self.sedfacdata["sUni"][nb]):
+                loadData = np.load(self.sedfacdata.iloc[nb, 2])
+                sedfacVal = loadData[self.sedfacdata.iloc[nb, 3]]
+                del loadData
+            else:
+                sedfacVal = np.full(self.mpoints, self.sedfacdata.iloc[nb, 1])
+            sedfacVal[sedfacVal < 0.1] = 0.1
+            self.sedFacMesh = sedfacVal
+
+        self.sedfacVal = self.sedFacMesh[self.locIDs]
 
         return
 
@@ -751,6 +823,8 @@ class UnstMesh(object):
 
         self.hLocal.destroy()
         self.hGlobal.destroy()
+        self.hOldFlex.destroy()
+        self.dh.destroy()
         self.FAG.destroy()
         self.FAL.destroy()
         self.fillFAL.destroy()
@@ -758,16 +832,6 @@ class UnstMesh(object):
         self.cumEDLocal.destroy()
         self.vSed.destroy()
         self.vSedLocal.destroy()
-        if self.stratNb > 0:
-            if self.stratF is not None:
-                self.vSedf.destroy()
-                self.vSedfLocal.destroy()
-            if self.stratW is not None:
-                self.vSedw.destroy()
-                self.vSedwLocal.destroy()
-            if self.carbOn:
-                self.vSedc.destroy()
-                self.vSedcLocal.destroy()
         self.areaGlobal.destroy()
         self.bG.destroy()
         self.bL.destroy()
@@ -782,26 +846,21 @@ class UnstMesh(object):
         self.EbLocal.destroy()
         self.upsG.destroy()
         self.upsL.destroy()
-
+        if self.iceOn:
+            self.iceFAG.destroy()
+            self.iceFAL.destroy()
+        
         self.iMat.destroy()
         if not self.fast:
             self.fMat.destroy()
         self.lgmap_col.destroy()
         self.lgmap_row.destroy()
         self.dm.destroy()
+        self.zMat.destroy()
 
         del self.lcoords, self.lcells, self.inIDs
 
         del self.stratH, self.stratZ, self.phiS
-
-        if self.stratF is not None:
-            del self.stratF, self.phiF
-
-        if self.stratW is not None:
-            del self.stratW, self.phiW
-
-        if self.carbOn:
-            del self.stratC, self.phiC
 
         if not self.fast:
             del self.distRcv, self.wghtVal, self.rcvID

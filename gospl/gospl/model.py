@@ -11,6 +11,8 @@ if "READTHEDOCS" not in os.environ:
     from .sed import STRAMesh as _STRAMesh
     from .tools import ReadYaml as _ReadYaml
     from .mesher import UnstMesh as _UnstMesh
+    from .tools import GridProcess as _GridProcess
+    from .tools import GlobalFlex as _GlobalFlex
     from .mesher import EarthPlate as _EarthPlate
     from .tools import WriteMesh as _WriteMesh
 
@@ -52,6 +54,13 @@ else:
         def __init__(self):
             pass
 
+    class _GridProcess(object):
+        def __init__(self):
+            pass
+
+    class _GlobalFlex(object):
+        def __init__(self):
+            pass
 
 MPIrank = MPI.COMM_WORLD.Get_rank()
 
@@ -60,6 +69,8 @@ class Model(
     _ReadYaml,
     _WriteMesh,
     _UnstMesh,
+    _GridProcess,
+    _GlobalFlex,
     _EarthPlate,
     _FAMesh,
     _PITFill,
@@ -79,24 +90,18 @@ class Model(
     :arg filename: YAML input file
     :arg verbose: output flag for model main functions
     :arg showlog: output flag for PETSC logging file
-    :arg carbctrl: carbonate control option
 
     """
 
     def __init__(
-        self, filename, verbose=True, showlog=False, carbctrl=None, *args, **kwargs
+        self, filename, verbose=True, showlog=False, *args, **kwargs
     ):
 
         self.showlog = showlog
 
         self.modelRunTime = process_time()
         self.verbose = verbose
-
-        self.carbOn = False
-        if carbctrl is not None:
-            self.carbOn = True
-            self.carbCtrl = carbctrl
-
+        
         # Read input dataset
         _ReadYaml.__init__(self, filename)
 
@@ -105,9 +110,6 @@ class Model(
 
         # Define unstructured mesh
         _UnstMesh.__init__(self)
-
-        # Initialise earth plate
-        _EarthPlate.__init__(self)
 
         # Initialise output mesh
         _WriteMesh.__init__(self)
@@ -124,12 +126,21 @@ class Model(
         # Sediment initialisation
         _SEAMesh.__init__(self, *args, **kwargs)
 
-        # Check if simulations just restarted
-        if self.rStep > 0:
-            _WriteMesh.readData(self)
+        # Define grid processes
+        _GridProcess.__init__(self)
 
         # Get external forces
         _UnstMesh.applyForces(self)
+
+        # Define global flexural isostasy
+        _GlobalFlex.__init__(self)
+
+        # Initialise earth plate
+        _EarthPlate.__init__(self)
+
+        # Check if simulations just restarted
+        if self.rStep > 0:
+            _WriteMesh.readData(self)
 
         if not self.fast:
             # Compute flow accumulation
@@ -157,7 +168,7 @@ class Model(
          - applies user-defined tectonics forcing (horizontal and vertical displacements)
 
         """
-
+        # _GlobalFlex.globalFlex(self)
         while self.tNow <= self.tEnd:
             tstep = process_time()
 
@@ -173,23 +184,28 @@ class Model(
             if not self.fast:
                 # Compute flow accumulation
                 _FAMesh.flowAccumulation(self)
+                
                 # Perform River Incision
-                _FAMesh.riverIncision(self)
+                _FAMesh.erodepSPL(self)
+                
                 if not self.nodep:
                     # Downstream sediment deposition inland
+                    _FAMesh.flowAccumulation(self)
                     _SEDMesh.sedChange(self)
                     if self.seaDepo:
                         # Downstream sediment deposition in sea
                         _SEAMesh.seaChange(self)
+                
                 # Hillslope diffusion
                 _SEDMesh.getHillslope(self)
 
-            # Create new stratal layer
             if self.tNow >= self.saveStrat:
                 # Stratigraphic layer porosity and thicknesses under compaction
                 _STRAMesh.getCompaction(self)
-                self.stratStep += 1
-                self.saveStrat += self.strat
+
+            # Apply flexural isostasy
+            if self.flexOn:
+                _GridProcess.applyFlexure(self)
 
             # Update tectonic, sea-level & climatic conditions
             if self.tNow < self.tEnd:
@@ -197,6 +213,14 @@ class Model(
 
             # Advance time
             self.tNow += self.dt
+
+            if self.tNow >= self.nextFlex:
+                _GlobalFlex.globalFlexIso(self)
+
+            # Create new stratal layer
+            if self.tNow >= self.saveStrat:
+                self.stratStep += 1
+                self.saveStrat += self.strat
 
             if MPIrank == 0:
                 print(
