@@ -1,59 +1,134 @@
-FROM continuumio/anaconda3
+# docker build --platform linux/amd64 -t geodels/gospl:2024.09.01 .
+FROM continuumio/anaconda3:latest 
+# @sha256:bd2af590d39a5d1b590cd6ad2abab37ae386b7e2a9b9d91e110d3d82074f3af9
 LABEL org.opencontainers.image.authors="tristan.salles@sydney.edu.au"
-RUN apt-get update 
-RUN /opt/conda/bin/conda config --env --add channels defaults 
-RUN /opt/conda/bin/conda config --env --add channels conda-forge 
-RUN /opt/conda/bin/conda config --env --add channels anaconda
-RUN /opt/conda/bin/conda update -n base -c defaults conda && \
-    /opt/conda/bin/conda install python=3.10 && \
-    /opt/conda/bin/conda install anaconda-client && \
-    /opt/conda/bin/conda install jupyter -y && \
-    /opt/conda/bin/conda install numpy pandas scikit-learn scikit-image matplotlib seaborn h5py -y 
-RUN /opt/conda/bin/conda install -c conda-forge pygplates
-RUN /opt/conda/bin/conda install compilers petsc4py llvm-openmp netCDF4 -y && \
-    /opt/conda/bin/conda install mpi4py matplotlib numpy-indexed pysheds -y
-RUN pip install  richdem descartes pyevtk vtk stripy triangle
-RUN pip install meshio==4.4.6
-RUN pip install triangle
-RUN /opt/conda/bin/conda install packaging -y
-RUN /opt/conda/bin/conda install gmt -y
-RUN /opt/conda/bin/conda install pygmt -y
-RUN /opt/conda/bin/conda install numba -y
-RUN /opt/conda/bin/conda install -c conda-forge meshplex -y
-RUN apt-get install -y m4
-RUN /opt/conda/bin/conda install rioxarray -y
-RUN /opt/conda/bin/conda install boost-cpp -y
-RUN apt-get update && apt-get install ffmpeg libsm6 libxext6  -y
-RUN /opt/conda/bin/conda install make -y
-RUN /opt/conda/bin/conda install -c conda-forge esmf -y
-RUN /opt/conda/bin/conda install -c conda-forge xesmf -y
-RUN /opt/conda/bin/conda install -c conda-forge ncurses -y
-RUN /opt/conda/bin/conda install -c conda-forge metpy -y
-RUN /opt/conda/bin/conda install -c conda-forge xarray-spatial -y
-RUN /opt/conda/bin/conda install -c conda-forge gflex -y
-RUN /opt/conda/bin/conda install -c conda-forge jigsaw -y
-RUN pip install wget cmocean cartopy
-RUN pip install numpy==1.23.4
-RUN pip uninstall stripy -y
-RUN pip install stripy
-ENV ESMFMKFILE=/opt/conda/lib/esmf.mk
-RUN pip install pyvista
-RUN apt-get install -y libtbb2
-# See file packages/README-docker for the installation of pnetcdf and parallel-dbscan
-COPY packages/pnetcdf/lib/libpnetcdf.* /opt/conda/lib/
-COPY packages/pnetcdf/lib/pnetcdf.pc /opt/conda/lib/pkgconfig/
-COPY packages/pnetcdf/include/* /opt/conda/include/
-COPY packages/pDBSCAN/dbscan /opt/conda/bin/
-RUN chmod +x /opt/conda/bin/dbscan
+
+# Instal basic utilities
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git wget unzip bzip2 sudo build-essential ca-certificates && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+RUN apt-get update
+RUN apt-get install -y libopenblas-dev liblapack-dev
+
+# Create conda environment
+RUN conda create -y -n gospl python=3.11.8 pip numpy
+RUN echo "source activate gospl" > ~/.bashrc
+ENV PATH=/opt/conda/envs/gospl/bin:$PATH
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && conda config --env --add channels defaults \
+    && conda config --env --add channels conda-forge \
+    && conda config --env --add channels anaconda
+
+# Compilers libraries
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && conda install compilers numpy==1.26.4 -y \
+    && conda install compilers mpi4py -y
+
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && conda install meson-python -y
+
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && conda install dask -y \
+    && apt-get install -y libgl1
+
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && conda install scipy==1.13.1 pandas==2.2.2 h5py==3.11.0 -y \
+    && conda install numba ruamel.yaml -y
+
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && conda install gflex meshplex numpy-indexed jupyter -y
+
+# Dependencies for post- & pre- processing
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && conda install pyevtk==1.6.0 -y \
+    && conda install rasterio==1.3.9 -y 
+
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \  
+    && conda install pyvista==0.44.0 -y \
+    && conda install xarray==2024.6.0 -y
+
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && conda install shapely==2.0.4 seaborn==0.13.2 -y \
+    && pip install stripy
+
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && conda install xesmf==0.8.5 -y \
+    && conda install mpas_tools==0.33.0 -y
+
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && conda install rioxarray==0.15.5 uxarray -y
+
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && conda install pysheds==0.4 pyproj==3.6.1 -y
+
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && conda install gmt pygmt==0.12.0 -y
+
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && conda install pysqlite3 --y \
+    && pip install perlin_noise
+
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && conda install pyinterp 
+
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && conda install petsc4py -y
+
+# Install isoFLex
+COPY packages/isoFlex /root/isoFlex
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && cd /root/isoFlex/; pip install .
+
 # Install goSPL
-COPY gospl /root/gospl
-RUN cd /root/gospl/; python3 setup.py install
+COPY packages/gospl /root/gospl
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && cd /root/gospl/; pip install .
+
 # Define shared volume folder
 RUN ["mkdir", "notebooks"]
+
 # BASH command
-ADD conf/bashrc-term /root/.bashrc
 COPY conf/.jupyter /root/.jupyter
 COPY run_jupyter.sh /
+ADD conf/bashrc-term /root/.bashrc
+
 # Jupyter port
 EXPOSE 8888
 # Store notebooks in this mounted directory
