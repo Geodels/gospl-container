@@ -1,0 +1,57 @@
+[build-system]
+build-backend = "mesonpy"
+requires = [
+    "numpy",
+    "pip",
+    "meson-python>=0.15.0",
+    "setuptools>=61.0",
+    "build",
+]
+
+[project]
+name = "isoflex"
+dynamic = ["version"]
+description = "Flexural isostasy"
+readme = "README.md"
+authors = [
+  {name = "Tristan Salles", email = "tristan.salles@sydney.edu.au"},
+]
+maintainers = [
+  {name = "Tristan Salles", email = "tristan.salles@sydney.edu.au"},
+]
+license = { file = "LICENSE" }
+requires-python = ">=3.7"
+classifiers = [
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+keywords = [
+            "python",
+            "landscape-evolution",
+            "basin-modeling",
+        ]
+dependencies = [
+    "numpy>=1.16.0",
+    "scipy",
+    "pyproj",
+    "xarray",
+    "rioxarray",
+    "gflex",
+    "mpi4py",
+]
+
+[tool.setuptools]
+packages = [
+    "isoFlex",
+]
+
+[project.optional-dependencies]
+dev = ["pip-tools", "pytest"]
+
+[project.urls]
+Homepage = "https://github.com/Geodels/isoFlex"
