@@ -100,14 +100,29 @@ RUN conda init bash \
 RUN conda init bash \
     && . ~/.bashrc \
     && conda activate gospl \
-    && conda install pyinterp 
+    && conda install petsc4py -y
 
 RUN conda init bash \
     && . ~/.bashrc \
     && conda activate gospl \
-    && conda install petsc4py -y
+    && conda install pysqlite3
 
-# Install isoFLex
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && conda install sqlite -y
+
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && conda install cmake -y 
+
+RUN conda init bash \
+    && . ~/.bashrc \
+    && conda activate gospl \
+    && pip install pyinterp
+
+# Install isoFlex
 COPY packages/isoFlex /root/isoFlex
 RUN conda init bash \
     && . ~/.bashrc \
