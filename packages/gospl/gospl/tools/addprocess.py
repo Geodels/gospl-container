@@ -7,7 +7,6 @@ import pandas as pd
 
 from mpi4py import MPI
 from scipy import spatial
-from gflex.f2d import F2D
 from time import process_time
 
 petsc4py.init(sys.argv)
@@ -16,6 +15,7 @@ MPIsize = petsc4py.PETSc.COMM_WORLD.Get_size()
 MPIcomm = MPI.COMM_WORLD
 
 if "READTHEDOCS" not in os.environ:
+    from gflex.f2d import F2D
     from gospl._fortran import flexure
     libisoglob = True
     try:
@@ -38,6 +38,12 @@ class GridProcess(object):
 
     1. **Flexural isostasy**: it allows to compute isostatic deflections of Earth's lithosphere with uniform or non-uniform flexural rigidity. Evolving surface loads are defined from erosion/deposition values associated to modelled surface processes.
     2. **Orographic rain**: it accounts for change in rainfall patterns associated to change in topography. The orographic precipitation function is based on `Smith & Barstad (2004) <https://journals.ametsoc.org/view/journals/atsc/61/12/1520-0469_2004_061_1377_altoop_2.0.co_2.xml>`_ linear model.
+
+    For global simulation, the library `isoFlex <https://github.com/Geodels/isoFlex>`_ provides a  wrapper around `gFlex <https://github.com/awickert/gFlex>`_ to estimate global-scale flexural isostasy based on tiles distribution and projection in parallel. 
+
+    .. note::
+        Better implementation would likely provide better performance than the one proposed here for computing flexural isostasy...
+
     """
 
     def __init__(self):
@@ -49,8 +55,6 @@ class GridProcess(object):
         self.flex = None
         self.xIndices = None
 
-        self.grav = 9.81
-
         if self.flexOn:
             self.rho_water = 1030.0
             self.localFlex = np.zeros(self.lpoints)
@@ -60,6 +64,7 @@ class GridProcess(object):
                 self.boundflex = self.boundflex.replace('2', '1')
             self.globalfData = None
             self.globalfStep = 0
+            self.simfStep = 0
         if self.oroOn:
             self.oroEPS = np.finfo(float).eps
 
@@ -185,6 +190,75 @@ class GridProcess(object):
 
         return
 
+    def _cptFlex2D(self, dZ):
+        """
+        Compute the flexural response for 2D cases.
+        """
+
+        # Build regular grid for flexure calculation
+        if self.xIndices is None:
+            self._buildRegGrid()
+
+        # Interpolate values on the flexural regular grid
+        regDiff = np.sum(self.regWeights * dZ[self.regIDs][:, :], axis=1) / self.regSumWeights
+        if len(self.regOnIDs) > 0:
+            regDiff[self.regOnIDs] = dZ[self.regIDs[self.regOnIDs, 0]]
+        regDiff = regDiff.reshape(self.reg_ny, self.reg_nx)
+
+        if self.flex_method == 'FFT':
+            nFlex = flexure(regDiff, self.reg_ny, self.reg_nx, self.reg_yl, self.reg_xl,
+                            self.young, self.nu, self.flex_rhos, self.flex_rhoa,
+                            self.flex_eet, self.gravity, int(self.boundflex))
+
+            # Interpolate back to goSPL mesh
+            flexZ = self._regInterp(nFlex)
+
+        elif self.flex_method == 'FD':
+            if self.simfStep == 0:
+                self.simflex = F2D()
+                self.simflex.Quiet = True
+
+                self.simflex.Method = "FD"
+                self.simflex.PlateSolutionType = "vWC1994"
+                self.simflex.Solver = "direct"
+
+                # gFlex parameters
+                self.simflex.g = self.gravity
+                self.simflex.E = self.young
+                self.simflex.nu = self.nu
+                self.simflex.rho_m = self.flex_rhoa
+                self.simflex.rho_fill = 0.
+                self.simflex.dx = self.reg_dx
+                self.simflex.dy = self.reg_dx
+
+                # Boundary conditions
+                self.simflex.BC_E = self.flex_bcE
+                self.simflex.BC_W = self.flex_bcW
+                self.simflex.BC_S = self.flex_bcN
+                self.simflex.BC_N = self.flex_bcS
+
+                self.simfStep = 1
+
+            # Assign elastic thickness grid
+            if self.tedata is not None:
+                self._updateTe()
+                self.simflex.Te = self.flexTe.copy()
+            else:
+                self.simflex.Te = self.flex_eet * np.ones(regDiff.shape)
+
+            # Compute loads
+            self.simflex.qs = self.flex_rhos * self.gravity * regDiff
+
+            # Run gFlex
+            self.simflex.initialize()
+            self.simflex.run()
+            self.simflex.finalize()
+
+            # Interpolate back to goSPL mesh
+            flexZ = self._regInterp(self.simflex.w)
+
+        return flexZ
+
     def applyFlexure(self):
         r"""
         This function computes the flexural isostasy equilibrium based on topographic change. It is a simple routine that accounts for flexural isostatic rebound associated with erosional loading/unloading.
@@ -196,9 +270,6 @@ class GridProcess(object):
           D (d^4 w / d^4 x ) + \Delta \rho g w = q
 
         where :math:`D` is the flexural rigidity,  :math:`w` is vertical deflection of the plate, :math:`q` is the applied surface load, and :math:`\Delta \rho = \rho_m − \rho_f` is the density of the mantle minus the density of the infilling material.
-
-        .. warning ::
-            This function assumes a value of 10^11 Pa for Young's modulus, 0.25 for Poisson's ratio and 9.81 m/s2 for g, the gravitational acceleration.
         """
 
         t0 = process_time()
@@ -223,82 +294,26 @@ class GridProcess(object):
             self.globalfData[:, 3] = dZ
             self.globalfData[:, 4] = Te
 
-            if self.globalfStep == 0:
-                self.fmodel = iflex(None, None, self.globalfData, None,
-                                    self.young, self.nu, self.flex_rhoa,
-                                    self.flex_rhos, 2, self.verbose)
-
-                self.fmodel.runFlex()
-                self.globalfStep = 1
-            else:
-                self.fmodel.updateFlex(self.globalfData[:, 3:])
-                self.fmodel.runFlex()
-
+            # if self.globalfStep == 0:
+            fmodel = iflex(None, None, self.globalfData, None,
+                           self.young, self.nu, self.flex_rhoa,
+                           self.flex_rhos, self.gravity,
+                           2, self.verbose)
+            fmodel.runFlex()
             if MPIrank == 0:
-                flexZ = self.fmodel.simflex.copy()
+                flexZ = fmodel.simflex.copy()
+            del fmodel
+            gc.collect()
+            # self.globalfStep = 1
+            # else:
+            # self.fmodel.updateFlex(self.globalfData[:, 3:])
+            # self.fmodel.runFlex()
 
         if self.flex_method == 'global' and not libisoglob and MPIrank == 0:
             flexZ = np.zeros(len(self.mCoords))
 
         if MPIrank == 0 and self.flex_method != 'global':
-            # Build regular grid for flexure calculation
-            if self.xIndices is None:
-                self._buildRegGrid()
-
-            # Interpolate values on the flexural regular grid
-            regDiff = np.sum(self.regWeights * dZ[self.regIDs][:, :], axis=1) / self.regSumWeights
-            if len(self.regOnIDs) > 0:
-                regDiff[self.regOnIDs] = dZ[self.regIDs[self.regOnIDs, 0]]
-            regDiff = regDiff.reshape(self.reg_ny, self.reg_nx)
-
-            if self.flex_method == 'FFT':
-                nFlex = flexure(regDiff, self.reg_ny, self.reg_nx, self.reg_yl, self.reg_xl,
-                                self.young, self.nu, self.flex_rhos, self.flex_rhoa,
-                                self.flex_eet, int(self.boundflex))
-
-                # Interpolate back to goSPL mesh
-                flexZ = self._regInterp(nFlex)
-
-            elif self.flex_method == 'FD':
-                flex = F2D()
-                flex.Quiet = True
-
-                flex.Method = "FD"
-                flex.PlateSolutionType = "vWC1994"
-                flex.Solver = "direct"
-
-                # gFlex parameters
-                flex.g = 9.81
-                flex.E = self.young
-                flex.nu = self.nu
-                flex.rho_m = self.flex_rhoa
-                flex.rho_fill = 0.
-
-                # Assign elastic thickness grid
-                if self.tedata is not None:
-                    self._updateTe()
-                    flex.Te = self.flexTe.copy()
-                else:
-                    flex.Te = self.flex_eet * np.ones(regDiff.shape)
-
-                # Compute loads
-                flex.qs = self.flex_rhos * flex.g * regDiff
-                flex.dx = self.reg_dx
-                flex.dy = self.reg_dx
-
-                # Boundary conditions
-                flex.BC_E = self.flex_bcE
-                flex.BC_W = self.flex_bcW
-                flex.BC_S = self.flex_bcN
-                flex.BC_N = self.flex_bcS
-
-                # Run gFlex
-                flex.initialize()
-                flex.run()
-                flex.finalize()
-
-                # Interpolate back to goSPL mesh
-                flexZ = self._regInterp(flex.w)
+            flexZ = self._cptFlex2D(dZ)
 
         # Send flexural response globally
         flexZ = MPI.COMM_WORLD.bcast(flexZ, root=0)

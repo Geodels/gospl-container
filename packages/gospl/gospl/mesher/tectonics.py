@@ -27,13 +27,11 @@ MPIcomm = MPI.COMM_WORLD
 class Tectonics(object):
 
     """
-    This class defines how spherical mesh surface is changing given a plate reconstruction model.
-
-    The horizontal displacement over time is done through a series of input files that defines the neighboring nodes that will be used for interpolation.
+    This class defines how 2D and spherical mesh surface is changing given a set of horizontal and vertical rates.
 
     .. note::
 
-        The interpolation is based on nearest neighbour search based on the tree built from the spherical mesh and is weighted by distance. This is an efficient approach but it might not be the most accurate one.
+        Three advection approaches are proposed, a standard upwind scheme, a Inflow-Implicit/Outflow-Explicit scheme and a semi-lagrangian approach based on nearest neighbour search based on the tree built from the spherical mesh and is weighted by distance.
     """
 
     def __init__(self):
@@ -166,7 +164,7 @@ class Tectonics(object):
                 data,
             )
             tmpMat.assemblyEnd()
-            advMat_left += tmpMat
+            advMat_left.axpy(1.0, tmpMat)
             tmpMat.destroy()
             if iioe:
                 tmpMat = self._matrix_build()
@@ -181,12 +179,36 @@ class Tectonics(object):
                     data,
                 )
                 tmpMat.assemblyEnd()
-                advMat_right += tmpMat
+                advMat_right.axpy(1.0, tmpMat)
                 tmpMat.destroy()
         if iioe:
             return advMat_left, advMat_right
         else:
             return advMat_left
+
+    def _advectorIIOE2(self, vL, newv, vmin, vmax, nbOut):
+        """
+        Perform the advection for the Inflow-Implicit/Outflow-Explicit Scheme 2.
+        """
+
+        diffmax = newv - vmax
+        diffmax[diffmax < 0] = 0.
+        diffmin = newv - vmin
+        diffmin[diffmin > 0] = 0.
+        diff = np.abs(diffmax) + np.abs(diffmin)
+        self.tmpL.setArray(diff)
+        self.dm.localToGlobal(self.tmpL, self.tmp)
+        excess = self.tmp.sum()
+
+        if excess > 0.:
+            lCoeffs, rCoeffs = adveciioe2(self.lpoints, self.dt, nbOut, vL, vmin, vmax)
+            advMat_left2, advMat_right2 = self._buildAdvecMat(True, lCoeffs, rCoeffs)
+            advMat_right2.mult(self.hGlobal, self.tmp1)
+            self._solve_KSP(True, advMat_left2, self.tmp1, self.tmp)
+            advMat_left2.destroy()
+            advMat_right2.destroy()
+
+        return
 
     def _varAdvector(self):
         """
@@ -202,11 +224,11 @@ class Tectonics(object):
 
             The method allows large time steps without losing stability and not deteriorating precision.
 
-            It is formally second order accurate in space and time for 1D advection problems with variable velocity and numerical experiments indicates its second order accuracy for smooth solutions in general.
+            It is formally second order accurate in space and time for 1D advection problems with variable velocity and numerical experiments indicate its second order accuracy for smooth solutions in general.
 
         .. note::
 
-            Velocity at the face is taken to be the linear interpolation for each vertex (in a vertex-centered discretisation the dual of the delaunay triangulation (i.e. the voronoi mesh has its edges on the middle of the nodes edges)
+            Velocity at the face is taken to be the linear interpolation for each vertex (in a vertex-centered discretisation the dual of the delaunay triangulation (i.e. the voronoi mesh has its edges on the middle of the nodes edges)).
 
             Similarly we consider that the advected variable at the face is defined by linear interpolation from each connected vertex.
         """
@@ -237,19 +259,7 @@ class Tectonics(object):
             if self.advscheme == 3:
                 self.dm.globalToLocal(self.tmp, self.tmpL)
                 newh = self.tmpL.getArray()
-                diffmax = newh - hmax
-                diffmax[diffmax < 0] = 0.
-                diffmin = newh - hmin
-                diffmin[diffmin > 0] = 0.
-                diff = np.abs(diffmax) + np.abs(diffmin)
-                self.tmpL.setArray(diff)
-                self.dm.localToGlobal(self.tmpL, self.tmp)
-                excess = self.tmp.sum()
-                if excess > 0.:
-                    lCoeffs, rCoeffs = adveciioe2(self.lpoints, self.dt, nbOut, hL, hmin, hmax)
-                    advMat_left, advMat_right = self._buildAdvecMat(iioe, lCoeffs, rCoeffs)
-                    advMat_right.mult(self.hGlobal, self.tmp1)
-                    self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
+                self._advectorIIOE2(hL, newh, hmin, hmax, nbOut)
         else:
             # Upwind scheme with potentially excessive diffusion solved implicitly
             self._solve_KSP(True, advMat_left, self.hGlobal, self.tmp)
@@ -278,19 +288,7 @@ class Tectonics(object):
             if self.advscheme == 3:
                 self.dm.globalToLocal(self.tmp, self.tmpL)
                 newed = self.tmpL.getArray()
-                diffmax = newed - edmax
-                diffmax[diffmax < 0] = 0.
-                diffmin = newed - edmin
-                diffmin[diffmin > 0] = 0.
-                dh = np.abs(diffmax) + np.abs(diffmin)
-                self.tmpL.setArray(dh)
-                self.dm.localToGlobal(self.tmpL, self.tmp)
-                excess = self.tmp.sum()
-                if excess > 0.:
-                    lCoeffs, rCoeffs = adveciioe2(self.lpoints, self.dt, nbOut, edL, edmin, edmax)
-                    advMat_left, advMat_right = self._buildAdvecMat(iioe, lCoeffs, rCoeffs)
-                    advMat_right.mult(self.cumED, self.tmp1)
-                    self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
+                self._advectorIIOE2(edL, newed, edmin, edmax, nbOut)
         else:
             # Upwind scheme with potentially excessive diffusion solved implicitly
             self._solve_KSP(True, advMat_left, self.cumED, self.tmp)
@@ -320,19 +318,7 @@ class Tectonics(object):
                 if self.advscheme == 3:
                     self.dm.globalToLocal(self.tmp, self.tmpL)
                     newfi = self.tmpL.getArray()
-                    diffmax = newfi - fimax
-                    diffmax[diffmax < 0] = 0.
-                    diffmin = newfi - fimin
-                    diffmin[diffmin > 0] = 0.
-                    dh = np.abs(diffmax) + np.abs(diffmin)
-                    self.tmpL.setArray(dh)
-                    self.dm.localToGlobal(self.tmpL, self.tmp)
-                    excess = self.tmp.sum()
-                    if excess > 0.:
-                        lCoeffs, rCoeffs = adveciioe2(self.lpoints, self.dt, nbOut, self.localFlex, fimin, fimax)
-                        advMat_left, advMat_right = self._buildAdvecMat(iioe, lCoeffs, rCoeffs)
-                        advMat_right.mult(self.tmp, self.tmp1)
-                        self._solve_KSP(True, advMat_left, self.tmp1, self.tmp)
+                    self._advectorIIOE2(self.localFlex, newfi, fimin, fimax, nbOut)
             else:
                 self.tmpL.setArray(self.localFlex)
                 self.dm.localToGlobal(self.tmpL, self.fiso)

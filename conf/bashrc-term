@@ -26,3 +26,7 @@ else
 fi
 unset __conda_setup
 # <<< conda initialize <<<
+
+
+bind '"\e[A": history-search-backward'
+bind '"\e[B": history-search-forward'

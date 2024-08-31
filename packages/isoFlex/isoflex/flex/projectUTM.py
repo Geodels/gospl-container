@@ -1,7 +1,7 @@
 import pyproj
 import numpy as np
 import xarray as xr
-# import rioxarray as xrio
+import rioxarray as xrio
 from mpi4py import MPI
 from time import process_time
 
@@ -252,3 +252,5 @@ class projectUTM(object):
                                 num=refinement))
 
         return np.concatenate(lons), np.concatenate(lats)
+
+

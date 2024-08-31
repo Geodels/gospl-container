@@ -159,6 +159,8 @@ class projectSpherical(object):
         nfds['flex'] = (('latitude', 'longitude'), newflex)
         nfds['flex'].attrs['units'] = 'metres'
 
+        del newflex
+
         return nfds[['flex']]
 
     def projectLonLat(self):

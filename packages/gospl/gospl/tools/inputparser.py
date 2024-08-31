@@ -68,8 +68,6 @@ class ReadYaml(object):
         self._readTeMap()
         self._readOut()
 
-        self.radius = 6378137.0
-        self.gravity = 9.81
         self.tNow = self.tStart
         self.saveTime = self.tNow
         if self.strat > 0:
@@ -237,11 +235,6 @@ class ReadYaml(object):
         domainDict = self.input["domain"]
 
         try:
-            self.fitMarine = domainDict["fitmarine"]
-        except KeyError:
-            self.fitMarine = False
-
-        try:
             advscheme = domainDict["advect"]
             if advscheme == 'iioe1':
                 self.advscheme = 2
@@ -253,6 +246,16 @@ class ReadYaml(object):
                 self.advscheme = 0
         except KeyError:
             self.advscheme = 1
+
+        try:
+            self.radius = domainDict["radius"]
+        except KeyError:
+            self.radius = 6378137.0
+
+        try:
+            self.gravity = domainDict["gravity"]
+        except KeyError:
+            self.gravity = 9.81
 
         return
 
@@ -342,22 +345,22 @@ class ReadYaml(object):
                 flush=True,
             )
 
-        try:
-            self.tecStep = timeDict["tec"]
-        except KeyError:
-            self.tecStep = self.tout
+        # try:
+        #     self.tecStep = timeDict["tec"]
+        # except KeyError:
+        #     self.tecStep = self.tout
 
         try:
             self.strat = timeDict["strat"]
         except KeyError:
             self.strat = 0
 
-        if self.tout < self.tecStep:
-            self.tecStep = self.tout
-            print(
-                "Output time interval and tectonic forcing time step have been adjusted to match each others.",
-                flush=True,
-            )
+        # if self.tout < self.tecStep:
+        #     self.tecStep = self.tout
+        #     print(
+        #         "Output time interval and tectonic forcing time step have been adjusted to match each others.",
+        #         flush=True,
+        #     )
 
         if self.tout < self.strat:
             self.strat = self.tout
@@ -367,13 +370,13 @@ class ReadYaml(object):
                 flush=True,
             )
 
-        if self.tecStep > 0:
-            if self.tout % self.tecStep != 0:
-                print(
-                    "When declaring tectonic time interval, the value should be divisible by the output time interval.",
-                    flush=True,
-                )
-                raise ValueError("Tectonic time interval definition is wrong!")
+        # if self.tecStep > 0:
+        #     if self.tout % self.tecStep != 0:
+        #         print(
+        #             "When declaring tectonic time interval, the value should be divisible by the output time interval.",
+        #             flush=True,
+        #         )
+        #         raise ValueError("Tectonic time interval definition is wrong!")
 
         if self.strat > 0:
             if self.tout % self.strat != 0:
@@ -969,10 +972,10 @@ class ReadYaml(object):
                     rStart = teSort[k]["start"]
                 except Exception:
                     print(
-                        "For each climate event a start time is required.", flush=True
+                        "For each elastic map event a start time is required.", flush=True
                     )
                     raise ValueError(
-                        "Climate event {} has no parameter start".format(k)
+                        "Elastic event {} has no parameter start".format(k)
                     )
                 try:
                     rUniform = teSort[k]["uniform"]

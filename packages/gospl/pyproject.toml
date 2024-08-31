@@ -48,7 +48,17 @@ keywords = [
             "science",
         ]
 dependencies = [
-    
+    "numpy>=1.16.0",
+    "petsc4py",
+    "scipy",
+    "numpy-indexed",
+    "pandas",
+    "h5py",
+    "meshio",
+    "vtk",
+    "ruamel.yaml",
+    "mpi4py",
+    "gflex",
 ]
 
 [tool.setuptools]

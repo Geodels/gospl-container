@@ -211,7 +211,7 @@ class computeFlex(object):
         flex.PlateSolutionType = "vWC1994"
         flex.Solver = "direct"
 
-        flex.g = 9.8
+        flex.g = self.gravity
         flex.rho_fill = 0.0
         flex.E = self.young
         flex.nu = self.nu

@@ -13,10 +13,11 @@ size = comm.Get_size()
 class Model(_projectUTM, _computeFlex, _projectSpherical):
 
     def __init__(self, filename=None, dsin=None, data=None, fileout=None,
-                 young=65.e9, nu=0.25, rho_m=3300.0, rho_s=2300.0, resg=2,
-                 verbose=False):
+                 young=65.e9, nu=0.25, rho_m=3300.0, rho_s=2300.0, gravity=9.81,
+                 resg=2,verbose=False):
 
         self.verbose = verbose
+        self.gravity = gravity
         _projectSpherical.__init__(self, fileout, size)
 
         # In case scattered data are provided, we first build an xarray
@@ -31,7 +32,6 @@ class Model(_projectUTM, _computeFlex, _projectSpherical):
         return
 
     def updateFlex(self, data):
-
         self.ds = _projectSpherical.updateData(self, data)
 
     def runFlex(self, gospl=True):
