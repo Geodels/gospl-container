@@ -1590,7 +1590,10 @@ subroutine mfdrcvrs(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
         val = val + slp(p)
       enddo
       do p = 1, ngbs
-        wgt(k,p) = slp(p) / val
+        ! wgt(k,p) = slp(p) / val
+        if(slp(p) > 0.)then
+          wgt(k,p) = 1. / kk
+        endif
       enddo
     else
       rcv(k,1:ngbs) = k-1
@@ -1606,7 +1609,10 @@ subroutine mfdrcvrs(nRcv, exp, elev, sl, rcv, dist, wgt, nb)
         val = val + slp(p)
       enddo
       do p = 1, ngbs
-        wgt(k,p) = slope(p)/val
+        ! wgt(k,p) = slope(p)/val
+        if(slp(p) > 0.)then
+          wgt(k,p) = 1. / kk
+        endif
       enddo
     endif
   enddo
